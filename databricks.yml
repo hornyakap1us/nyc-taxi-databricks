@@ -1,0 +1,85 @@
+# ==============================================================================
+# databricks.yml - Databricks Asset Bundle Configuration
+# Defines the project structure, environments, and resources
+# that get deployed to Databricks via the Databricks CLI
+# ==============================================================================
+
+
+# The top-level bundle name - this is how Databricks identifies
+# your project when deploying via the CLI
+bundle:
+  name: nyc-taxi-databricks
+
+# Variables allow values to be reused across the config and
+# swapped out depending on which environment you are deploying to
+variables:
+  databricks_host:
+    description: Databricks workspace URL
+  catalog: 
+    description: Unity Catalog name
+  schema:
+    description: Schema/database name
+
+# Targets define your environment - dev and prod each get their
+# own catalog and schema so they never interfere with each other
+targets:
+  # Dev is the default environment - this is where you test
+  # changes before promoting them to production
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: ${var.databricks_host}
+    variables:
+      catalog: dev_catalog
+      schema: nyc_taxi_dev
+
+  # Prod is the production environment - only gets deployed to 
+  # when code is merged to main via GitHub Actions
+  prod:
+    mode: production
+    workspace:
+      host: ${var.databricks_host}
+    variables:
+      catalog: prod_catalog
+      schema: nyc_taxi_prod
+
+# Resources define the Databricks objects that get created
+# and managed when you deploy this bundle
+resources:
+  # Pipelines defines the Delta Live Tables pipeline
+  # This is the medallion architecture pipeline that runs
+  # bronze -> silver -> gold transformations
+  pipelines:
+    taxi_dlt_pipeline:
+      # The pipeline name includes the target so you can tell
+      # dev and prod apart inside the databricks UI
+      name: "NYC Taxi DLT Pipeline [${bundle.target}]"
+      target: ${var.schema}
+      catalog: ${var.catalog}
+      # Points to the python file that defines the DLT pipeline
+      # This is where bronze, silver, and gold tables are defined
+      libraries:
+        - notebook:
+            path: ./pipelines/taxi_dlt_pipeline.py
+
+  # Jobs defines the Lakeflow Job that orchestrates and schedules
+  # the pipeline - this is what actually triggers the pipeline to run
+  jobs:
+    taxi_workflow:
+      name: "NYC Taxi Workflow [${bundle.target}]"
+      tasks:
+        # Each task represents one unit of work in the workflow
+        # Here we have one task that runs the DLT pipeline
+        - task_key: run_dlt_pipeline
+          pipeline_task: 
+            # References the DLT pipeline defined above by its ID
+            # Databricks resolves this automatically at deploy time
+            pipeline_id: ${resources.pipelines.taxi_dlt_pipeline.id}
+
+# The big picture of how this file works:
+
+# When you run databricks bundle deploy --target dev from the CLI, 
+# Databricks reads this file, connects to your workspace, and creates the pipeline and job in your dev environment automatically
+#When you merge to main and GitHub Actions runs, it does the same thing but deploys to prod instead
+#The ${var.catalog} and ${var.schema} placeholders get swapped out automatically with the right values depending on which target you're deploying to — so dev never touches prod data
