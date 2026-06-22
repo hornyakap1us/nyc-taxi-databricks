@@ -1,0 +1,38 @@
+# ==============================================================================
+# taxi_workflow.yml - Databricks Workflow Definition
+# Defines the Lakeflow Job that orchestrates and schedules the pipeline
+# This replaces what Apache Airflow was doing in the previous project
+# ==============================================================================
+
+resources:
+  jobs:
+    taxi_workflow:
+      name: "NYC Taxi Workflow [${bundle.target}]"
+
+      # Run the pipeline daily at midnight
+      trigger:
+        pause_status: UNPAUSED
+        periodic:
+          interval: 1
+          unit: DAYS
+      
+      # Email notification if the job fails
+      email_notifications:
+        on_failure:
+          - hornyakap1@gmail.com
+      
+      tasks:
+        # Task 1 - Run the Delta Live Tables pipeline
+        # This executes the full bronze -> silver -> gold transformations
+        - task_key: run_dlt_pipeline
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.taxi_dlt_pipeline.id}
+
+        # Task 2 - Run data quality tests after pipeline completes
+        # This only runs if Task 1 succeeds
+        - task_key: run_data_quality_tests
+          depends_on: 
+            - task_key: run_dlt_pipeline
+          notebook_task:
+            notebook_path: ./tests/test_data_quality.py
+            source: WORKSPACE
