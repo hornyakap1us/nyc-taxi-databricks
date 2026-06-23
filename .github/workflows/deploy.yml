@@ -1,0 +1,63 @@
+# =====================================================================
+# deploy.yml - GitHub Actions CI/CD Pipeline
+# Automatically runs data quality tests and deploys to Databricks on every push
+# Pull requests deploy to dev environment for validation
+# Merges to main deploy to prod environment
+# =====================================================================
+
+name: Databricks CI/CD Pipeline
+
+# Trigger this workflow on push and pull request events against main
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1 - Check out the code from GitHub
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Step 2 - Set up Python 3.11 for running tests
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      # Step 3 - Install required dependencies
+      # pytest runs the tests, databricks-sdk is needed for deployment
+      - name: Install dependencies
+        run: |
+          pip install pytest pyspark databricks-sdk databricks-cli
+
+      # Step 4 - Run data quality tests
+      # If any test fails the workflow stops here and deployment is blocked
+      - name: Run data quality tests
+        run: python -m pytest tests/ -v
+
+      # Step 5 - Install Databricks CLI for deployment
+      - name: Install Databricks CLI
+        run: pip install databricks-cli
+
+      # Step 6 - Deploy to dev when a pull request is opened
+      # This lets you validate changes in dev before merging to main
+      - name: Deploy to dev
+        if: github.event_name == 'pull_request'
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: databricks bundle deploy --target dev
+
+      # Step 7 - Deploy to prod when code is merged to main
+      # This only runs after tests pass and the PR is approved and merged
+      - name: Deploy to prod
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: databricks bundle deploy --target prod
